@@ -1,0 +1,67 @@
+default:
+  tags: [build,style, test,deploy]
+
+stages:
+  - build
+  - style
+  - test 
+  - deploy
+
+build_stage:
+  stage: build
+  tags:
+    - build
+  script:
+    - cd src/cat 
+    - make all
+    - cd ./../grep 
+    - make all
+  artifacts:
+    paths:
+      - src/cat/
+      - src/grep/
+    expire_in: 30 days
+
+style_stage:
+  stage: style
+  tags:
+    - style
+  script:
+  - clang-format -style=google -Werror -n src/cat/*.c src/cat/*.h
+  - clang-format -style=google -Werror -n src/grep/*.c src/grep/*.h
+
+test_stage:
+  stage: test
+  tags: 
+    - test
+  needs: 
+    - job: build_stage
+    - job: style_stage
+  script:
+    - cd src/grep
+    - make all
+    - output_grep=$(bash test_grep.sh)
+    - make clean
+    - fail_count_grep=$(echo "$output_grep" | grep "FAILED:" | awk '{print $4}')
+    - cd ../cat
+    - make all
+    - output_cat=$(bash tests.sh)
+    - make clean
+    - fail_count_cat=$(echo "$output_cat" | grep "FAILED:" | awk '{print $4}')
+    - if [ "$fail_count_grep" -ne "0" ]; then echo "grep FAIL:$fail_count_grep"; else echo "grep SUCCESS"; fi
+    - if [ "$fail_count_cat" -ne "0" ]; then echo "cat FAIL:$fail_count_cat"; else echo "cat SUCCESS"; fi
+    - if [[ "$fail_count_grep" -ne "0" ]] ||  [[ "$fail_count_cat" -ne "0" ]]; then exit 1; fi
+
+deploy_stage:
+  stage: deploy
+  tags:
+    - deploy
+  needs:
+    - job: build_stage
+    - job: style_stage
+    - job: test_stage
+  script:
+    - cd src
+    - chmod +x deploy.sh
+    - ./deploy.sh
+  when: manual
